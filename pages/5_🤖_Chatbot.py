@@ -11,6 +11,7 @@ import requests
 import json
 import re
 import sys, os
+import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 st.set_page_config(
@@ -83,15 +84,28 @@ def call_typhoon2(messages: list, hf_token: str, max_tokens: int = 1000) -> str:
         elif resp.status_code == 503:
             return "⏳ โมเดลกำลัง warm up อยู่ค่ะ กรุณารอสักครู่แล้วลองใหม่ (ประมาณ 20-30 วินาที)"
         elif resp.status_code == 401:
-            return "❌ HF Token ไม่ถูกต้อง กรุณาตรวจสอบ Token ใน sidebar ค่ะ"
+            return "❌ HF Token ไม่ถูกต้องหรือหมดอายุ กรุณาตรวจสอบ Token ใน sidebar ค่ะ"
         elif resp.status_code == 429:
             return "⚠️ Rate limit เกิน กรุณารอสักครู่แล้วลองใหม่ค่ะ (HF Free Tier ~few hundred req/hr)"
         else:
             return f"❌ Error {resp.status_code}: {resp.text[:200]}"
+    except requests.exceptions.ConnectionError:
+        return (
+            "🌐 ไม่สามารถเชื่อมต่อ HuggingFace API ได้ค่ะ\n\n"
+            "**สาเหตุที่เป็นไปได้:**\n"
+            "- ไม่มีการเชื่อมต่ออินเทอร์เน็ต หรือ DNS ขัดข้อง\n"
+            "- HuggingFace API อาจ down ชั่วคราว\n"
+            "- Firewall หรือ proxy บล็อกการเชื่อมต่อ\n\n"
+            "**วิธีแก้:** ตรวจสอบอินเทอร์เน็ต แล้วลองส่งคำถามใหม่อีกครั้งค่ะ"
+        )
     except requests.exceptions.Timeout:
-        return "⏰ Request timeout — โมเดลใช้เวลานานเกินไป กรุณาลองใหม่ค่ะ"
+        return (
+            "⏰ HuggingFace API ใช้เวลานานเกินไป (timeout 60s)\n\n"
+            "โมเดลอาจยังอยู่ในช่วง warm up กรุณาลองใหม่อีกครั้งค่ะ"
+        )
     except Exception as e:
-        return f"❌ เกิดข้อผิดพลาด: {str(e)}"
+        short_err = str(e)[:300]
+        return f"❌ เกิดข้อผิดพลาดที่ไม่คาดคิด:\n```\n{short_err}\n```"
 
 
 # ── Helper: Web Search via DuckDuckGo (no API key needed) ────────────────────
@@ -452,41 +466,44 @@ with tab_chat:
         context_parts = []
         sources_used = []
 
-        use_web    = "Web Search" in mode or "Hybrid" in mode
-        use_docs   = "เอกสาร" in mode or "Hybrid" in mode
-        has_docs   = len(st.session_state.get("pdf_chunks", [])) > 0
+        use_web  = "Web Search" in mode or "Hybrid" in mode
+        use_docs = "เอกสาร" in mode or "Hybrid" in mode
+        has_docs = len(st.session_state.get("pdf_chunks", [])) > 0
 
-        with st.spinner("🔍 กำลังค้นหาข้อมูล..."):
+        with st.status("🔄 กำลังประมวลผลคำถาม...", expanded=True) as status:
 
-            # ── Mode: PDF RAG ────────────────────────────────────────────────
+            # ── Step 1: PDF RAG ──────────────────────────────────────────────
             if use_docs and has_docs:
+                st.write("📄 ค้นหาข้อมูลในเอกสาร PDF ที่อัปโหลด...")
+                t0 = time.time()
                 relevant = simple_search_chunks(
-                    question,
-                    st.session_state["pdf_chunks"],
-                    top_k=5
+                    question, st.session_state["pdf_chunks"], top_k=5
                 )
-                if relevant:
-                    doc_context = "\n\n".join([
-                        f"[เอกสาร: {c['filename']} หน้า {c['page']}]\n{c['text']}"
-                        for c in relevant
-                        if c.get("score", 0) > 0
-                    ])
-                    if doc_context:
-                        context_parts.append(
-                            f"=== ข้อมูลจากเอกสารที่อัปโหลด ===\n{doc_context}"
-                        )
-                        unique_files = list({c["filename"] for c in relevant})
-                        sources_used.extend([f"📄 {fn}" for fn in unique_files])
+                elapsed = time.time() - t0
+                doc_context = "\n\n".join([
+                    f"[เอกสาร: {c['filename']} หน้า {c['page']}]\n{c['text']}"
+                    for c in relevant if c.get("score", 0) > 0
+                ])
+                if doc_context:
+                    context_parts.append(
+                        f"=== ข้อมูลจากเอกสารที่อัปโหลด ===\n{doc_context}"
+                    )
+                    unique_files = list({c["filename"] for c in relevant})
+                    sources_used.extend([f"📄 {fn}" for fn in unique_files])
+                    st.write(f"✅ พบ {len(relevant)} chunks ที่เกี่ยวข้องจากเอกสาร ({elapsed:.1f}s)")
+                else:
+                    st.write(f"⚠️ ไม่พบเนื้อหาที่ตรงกับคำถามในเอกสาร ({elapsed:.1f}s)")
 
             elif use_docs and not has_docs and "เอกสาร" in mode:
-                st.warning("⚠️ ยังไม่มีเอกสาร PDF — กรุณาอัปโหลดในแท็บ 'จัดการเอกสาร PDF' ก่อนค่ะ")
+                st.write("⚠️ ยังไม่มีเอกสาร PDF — กรุณาอัปโหลดในแท็บ 'จัดการเอกสาร PDF' ก่อนค่ะ")
 
-            # ── Mode: Web Search ─────────────────────────────────────────────
+            # ── Step 2: Web Search ───────────────────────────────────────────
             if use_web:
-                # สร้าง query ที่เหมาะสม
+                st.write("🌐 ค้นหาข้อมูลออนไลน์จาก IAEA/ปส. (DuckDuckGo)...")
+                t0 = time.time()
                 search_q = f"radiation safety {question} IAEA OAP Thailand"
                 results  = web_search(search_q, num_results=4)
-
+                elapsed  = time.time() - t0
                 web_context = "\n\n".join([
                     f"[แหล่ง: {r['title']}]\n{r['snippet']}"
                     for r in results
@@ -497,22 +514,16 @@ with tab_chat:
                         f"=== ข้อมูลจากการค้นหาออนไลน์ ===\n{web_context}"
                     )
                     sources_used.append("🌐 Web Search")
+                    st.write(f"✅ พบ {len(results)} แหล่งข้อมูลออนไลน์ ({elapsed:.1f}s)")
+                else:
+                    st.write(f"⚠️ ไม่พบข้อมูลจากการค้นหาออนไลน์ ({elapsed:.1f}s)")
 
-        # ── Build prompt ─────────────────────────────────────────────────────
-        with st.spinner("🤖 Typhoon2 กำลังตอบ..."):
-
-            # สร้าง context string
+            # ── Step 3: Build prompt ─────────────────────────────────────────
             context_str = "\n\n".join(context_parts) if context_parts else ""
-
-            # Build messages
             messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-
-            # ใส่ประวัติการสนทนา (สูงสุด 6 รอบล่าสุด)
-            history = st.session_state.chat_history[:-1]  # exclude current question
-            for h in history[-12:]:  # 6 รอบ = 12 messages
+            history = st.session_state.chat_history[:-1]
+            for h in history[-12:]:
                 messages.append({"role": h["role"], "content": h["content"]})
-
-            # User message พร้อม context
             if context_str:
                 user_msg = f"""คำถาม: {question}
 
@@ -522,13 +533,15 @@ with tab_chat:
 กรุณาตอบคำถามโดยอ้างอิงจากข้อมูลด้านบน และระบุว่าข้อมูลมาจากแหล่งใด"""
             else:
                 user_msg = question
-
             messages.append({"role": "user", "content": user_msg})
 
-            # Call Typhoon2
+            # ── Step 4: Call Typhoon2 API ────────────────────────────────────
+            st.write("🤖 ส่งคำถามไปยัง Typhoon2 API (HuggingFace Serverless)...")
+            st.write("⏳ รอการตอบกลับ — อาจใช้เวลา 10–30 วินาทีในครั้งแรก (model warm-up)...")
+            t0 = time.time()
             answer = call_typhoon2(messages, hf_token, max_tokens=800)
+            api_elapsed = time.time() - t0
 
-            # เพิ่มใน history
             if not sources_used:
                 sources_used.append("🧠 Typhoon2 (ความรู้โดยตรง)")
 
@@ -537,6 +550,33 @@ with tab_chat:
                 "content": answer,
                 "sources": sources_used,
             })
+
+            # ── Update status label ──────────────────────────────────────────
+            if answer.startswith("❌") or answer.startswith("⏰"):
+                status.update(
+                    label="❌ เกิดข้อผิดพลาด — ดูรายละเอียดด้านบน",
+                    state="error", expanded=True,
+                )
+            elif answer.startswith("🌐"):
+                status.update(
+                    label="🌐 ไม่สามารถเชื่อมต่อ HuggingFace API — ตรวจสอบอินเทอร์เน็ต",
+                    state="error", expanded=True,
+                )
+            elif answer.startswith("⏳"):
+                status.update(
+                    label="⏳ โมเดลกำลัง warm up — ลองใหม่อีกครั้งใน 20–30 วินาที",
+                    state="error", expanded=True,
+                )
+            elif answer.startswith("⚠️"):
+                status.update(
+                    label=f"⚠️ Rate limit หรือเกิดปัญหา ({api_elapsed:.1f}s)",
+                    state="error", expanded=True,
+                )
+            else:
+                status.update(
+                    label=f"✅ ตอบสำเร็จ — ใช้เวลาทั้งหมด {api_elapsed:.1f}s",
+                    state="complete", expanded=False,
+                )
 
         st.rerun()
 
