@@ -69,8 +69,8 @@ pages = [
         "features": ["คำนวณความหนากำบังรังสี", "กำหนด Controlled/Supervised Area", "AI ร่างแผนป้องกันอันตราย"],
         "color": "#7c3aed",
         "page": "pages/3_🛡️_แผนป้องกันอันตราย.py",
-        "status": "กำลังพัฒนา",
-        "status_color": "#d97706",
+        "status": "พร้อมใช้งาน",
+        "status_color": "#16a34a",
     },
     {
         "icon": "🔒",
@@ -79,8 +79,8 @@ pages = [
         "features": ["ครอบคลุมทุกหัวข้อตามกฎกระทรวง", "AI ร่างแผนความมั่นคง", "Export Word (.docx)"],
         "color": "#0891b2",
         "page": "pages/4_🔒_แผนความมั่นคง.py",
-        "status": "กำลังพัฒนา",
-        "status_color": "#d97706",
+        "status": "พร้อมใช้งาน",
+        "status_color": "#16a34a",
     },
     {
         "icon": "🤖",
@@ -89,8 +89,8 @@ pages = [
         "features": ["อัปโหลด PDF เอกสาร ปส.", "ถามตอบภาษาไทย", "อ้างอิงหน้าและแหล่งที่มา"],
         "color": "#be185d",
         "page": "pages/5_🤖_Chatbot.py",
-        "status": "กำลังพัฒนา",
-        "status_color": "#d97706",
+        "status": "พร้อมใช้งาน",
+        "status_color": "#16a34a",
     },
 ]
 
